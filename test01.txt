@@ -1,1 +1,358 @@
-created test01.txt file
+#!/usr/bin/env python3
+"""
+Network Traffic Anomaly Detector using Machine Learning
+Author: Your Name
+Description: Detects suspicious network traffic patterns using AI/ML techniques
+Use case: Cybersecurity monitoring and threat detection
+"""
+
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+import random
+import json
+import argparse
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class NetworkTrafficGenerator:
+    """Generate synthetic network traffic data for demonstration"""
+    
+    def __init__(self):
+        self.protocols = ['TCP', 'UDP', 'ICMP', 'HTTP', 'HTTPS', 'FTP', 'SSH']
+        self.normal_ports = [80, 443, 22, 21, 25, 53, 110, 993, 995]
+        self.suspicious_ports = [1337, 31337, 4444, 6666, 8080, 9999]
+        
+    def generate_normal_traffic(self, n_samples=1000):
+        """Generate normal network traffic patterns"""
+        data = []
+        
+        for _ in range(n_samples):
+            traffic = {
+                'timestamp': datetime.now() - timedelta(seconds=random.randint(0, 86400)),
+                'src_ip': f"192.168.1.{random.randint(1, 254)}",
+                'dst_ip': f"10.0.0.{random.randint(1, 254)}",
+                'src_port': random.choice(self.normal_ports + [random.randint(1024, 65535)]),
+                'dst_port': random.choice(self.normal_ports),
+                'protocol': random.choice(self.protocols[:4]),  # More common protocols
+                'packet_size': np.random.normal(512, 128),
+                'duration': np.random.exponential(2.0),
+                'bytes_sent': np.random.lognormal(8, 2),
+                'bytes_received': np.random.lognormal(7, 1.5),
+                'packets_sent': np.random.poisson(10),
+                'packets_received': np.random.poisson(8),
+                'is_anomaly': False
+            }
+            data.append(traffic)
+        
+        return data
+    
+    def generate_anomalous_traffic(self, n_samples=100):
+        """Generate anomalous/suspicious traffic patterns"""
+        data = []
+        
+        for _ in range(n_samples):
+            anomaly_type = random.choice(['port_scan', 'ddos', 'data_exfiltration', 'brute_force'])
+            
+            if anomaly_type == 'port_scan':
+                traffic = {
+                    'timestamp': datetime.now() - timedelta(seconds=random.randint(0, 86400)),
+                    'src_ip': f"203.0.113.{random.randint(1, 254)}",  # External IP
+                    'dst_ip': f"192.168.1.{random.randint(1, 254)}",
+                    'src_port': random.randint(1024, 65535),
+                    'dst_port': random.choice(self.suspicious_ports + self.normal_ports),
+                    'protocol': 'TCP',
+                    'packet_size': 64,  # Small packets for scanning
+                    'duration': 0.1,    # Very short duration
+                    'bytes_sent': 64,
+                    'bytes_received': 0,  # No response expected
+                    'packets_sent': 1,
+                    'packets_received': 0,
+                    'is_anomaly': True
+                }
+            
+            elif anomaly_type == 'ddos':
+                traffic = {
+                    'timestamp': datetime.now() - timedelta(seconds=random.randint(0, 86400)),
+                    'src_ip': f"{random.randint(1, 223)}.{random.randint(1, 254)}.{random.randint(1, 254)}.{random.randint(1, 254)}",
+                    'dst_ip': f"192.168.1.{random.randint(1, 10)}",  # Target server
+                    'src_port': random.randint(1024, 65535),
+                    'dst_port': 80,
+                    'protocol': 'TCP',
+                    'packet_size': np.random.normal(1024, 512),
+                    'duration': 0.01,   # Very short connections
+                    'bytes_sent': np.random.exponential(100),
+                    'bytes_received': 0,
+                    'packets_sent': np.random.poisson(50),  # High packet rate
+                    'packets_received': 0,
+                    'is_anomaly': True
+                }
+            
+            elif anomaly_type == 'data_exfiltration':
+                traffic = {
+                    'timestamp': datetime.now() - timedelta(seconds=random.randint(0, 86400)),
+                    'src_ip': f"192.168.1.{random.randint(1, 254)}",
+                    'dst_ip': f"198.51.100.{random.randint(1, 254)}",  # External IP
+                    'src_port': random.randint(1024, 65535),
+                    'dst_port': random.choice([80, 443, 53]),  # Common ports to hide
+                    'protocol': 'HTTPS',
+                    'packet_size': np.random.normal(1400, 200),  # Large packets
+                    'duration': np.random.exponential(60),       # Long duration
+                    'bytes_sent': np.random.lognormal(15, 2),    # Very large data transfer
+                    'bytes_received': np.random.lognormal(6, 1),
+                    'packets_sent': np.random.poisson(1000),     # High packet count
+                    'packets_received': np.random.poisson(100),
+                    'is_anomaly': True
+                }
+            
+            else:  # brute_force
+                traffic = {
+                    'timestamp': datetime.now() - timedelta(seconds=random.randint(0, 86400)),
+                    'src_ip': f"198.51.100.{random.randint(1, 254)}",
+                    'dst_ip': f"192.168.1.{random.randint(1, 254)}",
+                    'src_port': random.randint(1024, 65535),
+                    'dst_port': 22,  # SSH
+                    'protocol': 'SSH',
+                    'packet_size': 128,
+                    'duration': 5.0,  # Failed login attempts take time
+                    'bytes_sent': 256,
+                    'bytes_received': 128,
+                    'packets_sent': 10,
+                    'packets_received': 5,
+                    'is_anomaly': True
+                }
+            
+            data.append(traffic)
+        
+        return data
+
+class NetworkAnomalyDetector:
+    """Machine Learning based network anomaly detector"""
+    
+    def __init__(self, contamination=0.1):
+        self.model = IsolationForest(
+            contamination=contamination,
+            random_state=42,
+            n_estimators=100
+        )
+        self.scaler = StandardScaler()
+        self.feature_columns = [
+            'src_port', 'dst_port', 'packet_size', 'duration',
+            'bytes_sent', 'bytes_received', 'packets_sent', 'packets_received'
+        ]
+        self.is_trained = False
+        
+    def preprocess_data(self, df):
+        """Preprocess the traffic data for ML model"""
+        # Convert categorical data to numerical
+        df['protocol_encoded'] = pd.Categorical(df['protocol']).codes
+        
+        # Extract hour of day as a feature
+        df['hour'] = pd.to_datetime(df['timestamp']).dt.hour
+        
+        # Calculate derived features
+        df['bytes_ratio'] = df['bytes_sent'] / (df['bytes_received'] + 1)
+        df['packets_ratio'] = df['packets_sent'] / (df['packets_received'] + 1)
+        df['avg_packet_size'] = (df['bytes_sent'] + df['bytes_received']) / (df['packets_sent'] + df['packets_received'] + 1)
+        
+        # Select features for training
+        feature_columns = self.feature_columns + ['protocol_encoded', 'hour', 'bytes_ratio', 'packets_ratio', 'avg_packet_size']
+        X = df[feature_columns].fillna(0)
+        
+        return X, df
+    
+    def train(self, df):
+        """Train the anomaly detection model"""
+        logger.info("Preprocessing training data...")
+        X, _ = self.preprocess_data(df)
+        
+        logger.info("Scaling features...")
+        X_scaled = self.scaler.fit_transform(X)
+        
+        logger.info("Training Isolation Forest model...")
+        self.model.fit(X_scaled)
+        self.is_trained = True
+        
+        logger.info("Training completed!")
+        return self
+    
+    def predict(self, df):
+        """Predict anomalies in network traffic"""
+        if not self.is_trained:
+            raise ValueError("Model must be trained before making predictions")
+        
+        X, processed_df = self.preprocess_data(df)
+        X_scaled = self.scaler.transform(X)
+        
+        # Get predictions (-1 for anomaly, 1 for normal)
+        predictions = self.model.predict(X_scaled)
+        anomaly_scores = self.model.decision_function(X_scaled)
+        
+        processed_df['predicted_anomaly'] = predictions == -1
+        processed_df['anomaly_score'] = anomaly_scores
+        
+        return processed_df
+    
+    def evaluate(self, df):
+        """Evaluate model performance"""
+        results = self.predict(df)
+        
+        if 'is_anomaly' in results.columns:
+            y_true = results['is_anomaly']
+            y_pred = results['predicted_anomaly']
+            
+            print("\nClassification Report:")
+            print(classification_report(y_true, y_pred))
+            
+            print("\nConfusion Matrix:")
+            cm = confusion_matrix(y_true, y_pred)
+            print(cm)
+            
+            # Visualize confusion matrix
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+            plt.title('Confusion Matrix - Network Anomaly Detection')
+            plt.xlabel('Predicted')
+            plt.ylabel('Actual')
+            plt.show()
+        
+        return results
+
+def visualize_anomalies(df):
+    """Visualize detected anomalies"""
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Anomaly distribution by protocol
+    axes[0, 0].pie(df.groupby('protocol')['predicted_anomaly'].sum(), 
+                   labels=df.groupby('protocol')['predicted_anomaly'].sum().index,
+                   autopct='%1.1f%%')
+    axes[0, 0].set_title('Anomalies by Protocol')
+    
+    # Bytes sent vs received with anomalies highlighted
+    normal = df[~df['predicted_anomaly']]
+    anomalous = df[df['predicted_anomaly']]
+    
+    axes[0, 1].scatter(normal['bytes_sent'], normal['bytes_received'], 
+                      alpha=0.6, label='Normal', color='blue', s=20)
+    axes[0, 1].scatter(anomalous['bytes_sent'], anomalous['bytes_received'], 
+                      alpha=0.8, label='Anomaly', color='red', s=30)
+    axes[0, 1].set_xlabel('Bytes Sent')
+    axes[0, 1].set_ylabel('Bytes Received')
+    axes[0, 1].set_title('Traffic Pattern Analysis')
+    axes[0, 1].legend()
+    axes[0, 1].set_xscale('log')
+    axes[0, 1].set_yscale('log')
+    
+    # Anomaly scores distribution
+    axes[1, 0].hist(df['anomaly_score'], bins=50, alpha=0.7, color='purple')
+    axes[1, 0].set_xlabel('Anomaly Score')
+    axes[1, 0].set_ylabel('Frequency')
+    axes[1, 0].set_title('Anomaly Score Distribution')
+    axes[1, 0].axvline(x=0, color='red', linestyle='--', label='Decision Boundary')
+    axes[1, 0].legend()
+    
+    # Time series of anomalies
+    df_sorted = df.sort_values('timestamp')
+    anomaly_times = df_sorted[df_sorted['predicted_anomaly']]['timestamp']
+    
+    axes[1, 1].scatter(df_sorted['timestamp'], df_sorted['anomaly_score'], 
+                      alpha=0.6, s=10, color='gray')
+    for time in anomaly_times:
+        axes[1, 1].axvline(x=time, color='red', alpha=0.5, linewidth=0.5)
+    axes[1, 1].set_xlabel('Time')
+    axes[1, 1].set_ylabel('Anomaly Score')
+    axes[1, 1].set_title('Anomalies Over Time')
+    axes[1, 1].tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    plt.show()
+
+def save_results(df, filename='anomaly_results.json'):
+    """Save anomaly detection results"""
+    anomalies = df[df['predicted_anomaly']].copy()
+    anomalies['timestamp'] = anomalies['timestamp'].astype(str)
+    
+    results = {
+        'total_connections': len(df),
+        'anomalies_detected': len(anomalies),
+        'anomaly_rate': len(anomalies) / len(df) * 100,
+        'top_anomalies': anomalies.nlargest(10, 'anomaly_score')[
+            ['timestamp', 'src_ip', 'dst_ip', 'protocol', 'anomaly_score']
+        ].to_dict('records')
+    }
+    
+    with open(filename, 'w') as f:
+        json.dump(results, f, indent=2, default=str)
+    
+    logger.info(f"Results saved to {filename}")
+
+def main():
+    parser = argparse.ArgumentParser(description='Network Traffic Anomaly Detector')
+    parser.add_argument('--normal-samples', type=int, default=1000, 
+                       help='Number of normal traffic samples to generate')
+    parser.add_argument('--anomaly-samples', type=int, default=100,
+                       help='Number of anomalous traffic samples to generate')
+    parser.add_argument('--contamination', type=float, default=0.1,
+                       help='Expected proportion of outliers')
+    parser.add_argument('--visualize', action='store_true',
+                       help='Show visualization plots')
+    parser.add_argument('--save', action='store_true',
+                       help='Save results to JSON file')
+    
+    args = parser.parse_args()
+    
+    # Generate synthetic data
+    logger.info("Generating synthetic network traffic data...")
+    generator = NetworkTrafficGenerator()
+    
+    normal_traffic = generator.generate_normal_traffic(args.normal_samples)
+    anomalous_traffic = generator.generate_anomalous_traffic(args.anomaly_samples)
+    
+    all_traffic = normal_traffic + anomalous_traffic
+    df = pd.DataFrame(all_traffic)
+    
+    logger.info(f"Generated {len(df)} traffic samples ({len(normal_traffic)} normal, {len(anomalous_traffic)} anomalous)")
+    
+    # Train the model
+    detector = NetworkAnomalyDetector(contamination=args.contamination)
+    detector.train(df)
+    
+    # Evaluate the model
+    logger.info("Evaluating model performance...")
+    results = detector.evaluate(df)
+    
+    # Print summary
+    anomalies_detected = results['predicted_anomaly'].sum()
+    total_anomalies = results['is_anomaly'].sum()
+    
+    print(f"\nSummary:")
+    print(f"Total traffic samples: {len(results)}")
+    print(f"Actual anomalies: {total_anomalies}")
+    print(f"Detected anomalies: {anomalies_detected}")
+    print(f"Detection rate: {anomalies_detected/total_anomalies*100:.1f}%")
+    
+    # Visualizations
+    if args.visualize:
+        visualize_anomalies(results)
+    
+    # Save results
+    if args.save:
+        save_results(results)
+    
+    # Show some example detections
+    print("\nTop 5 Detected Anomalies:")
+    top_anomalies = results[results['predicted_anomaly']].nlargest(5, 'anomaly_score')
+    for _, row in top_anomalies.iterrows():
+        print(f"  {row['src_ip']}:{row['src_port']} -> {row['dst_ip']}:{row['dst_port']} "
+              f"({row['protocol']}) Score: {row['anomaly_score']:.3f}")
+
+if __name__ == "__main__":
+    main()
