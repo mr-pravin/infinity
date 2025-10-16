@@ -1,0 +1,37 @@
+import csv
+from functools import reduce
+import matplotlib.pyplot as plt
+
+x = []
+y = []
+
+with open("data.csv", "r") as file:
+    reader = csv.DictReader(file)
+    for row in reader:
+        x.append(int(row["day"]))
+        y.append(float(row["time"]))
+
+plt.scatter(x, y, color='blue')
+plt.xlabel("Day")
+plt.ylabel("Screen Time (hours)")
+plt.title("Screen Time Trend")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+xy = list(map(lambda a, b: a * b, x, y))
+xsq = list(map(lambda a: a ** 2, x))
+
+sx = reduce(lambda a, b: a + b, x)
+sy = reduce(lambda a, b: a + b, y)
+sxy = reduce(lambda a, b: a + b, xy)
+sxsq = reduce(lambda a, b: a + b, xsq)
+
+n = len(x)
+
+m = (n * sxy - sx * sy) / (n * sxsq - sx ** 2)
+c = (sy - m * sx) / n
+
+next_day = 8
+y8 = m * next_day + c
+print(f"Predicted screen time for Day {next_day} = {y8:.2f} hours")
